@@ -32,7 +32,7 @@ TABLES = [
 
 # ---------------- FILE UPLOAD ----------------
 files = st.file_uploader(
-    "Upload GSTR-1 JSON files (Any number of months)",
+    "Upload GSTR-1 JSON files",
     type="json",
     accept_multiple_files=True
 )
@@ -86,7 +86,7 @@ if generate:
                     cs += t[4]
 
             rows.extend([
-                {"Particulars": f"GSTR-1 Summary calculated by Govt. Portal:{table_name}", month: ""},
+                {"Particulars": f"GSTR-1 Summary calculated by Govt. Portal:{table_name}", month: 0},
                 {"Particulars": "Taxable Value", month: tx},
                 {"Particulars": "IGST", month: ig},
                 {"Particulars": "CGST", month: cg},
@@ -94,7 +94,6 @@ if generate:
                 {"Particulars": "Cess", month: cs},
             ])
 
-    # ---------------- DATAFRAME FIX ----------------
     df = pd.DataFrame(rows)
 
     # Ensure all months exist
@@ -102,9 +101,11 @@ if generate:
         if m not in df.columns:
             df[m] = 0
 
-    df = df.fillna(0)
-    df = df.groupby("Particulars", as_index=False).sum()
+    # Convert all month columns to numeric
+    for m in MONTH_ORDER:
+        df[m] = pd.to_numeric(df[m], errors="coerce").fillna(0)
 
+    df = df.groupby("Particulars", as_index=False).sum()
     df = df[["Particulars"] + MONTH_ORDER]
 
     # ---------------- EXCEL OUTPUT ----------------
@@ -120,4 +121,5 @@ if generate:
         "GSTR1_Zen_Summary.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
 
