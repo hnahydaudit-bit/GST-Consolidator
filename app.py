@@ -3,34 +3,33 @@ import json
 import pandas as pd
 from io import BytesIO
 
-# ---------------- Page Config ----------------
 st.set_page_config(page_title="GST Consolidator", layout="wide")
 st.title("GST Consolidator")
-st.caption("GSTR-1 JSON → Table-wise & Month-wise Consolidated Excel")
 
-# ---------------- Upload ----------------
 uploaded_files = st.file_uploader(
-    "Upload GSTR-1 JSON files (Any number of months)",
+    "Upload GSTR-1 JSON files",
     type="json",
     accept_multiple_files=True
 )
 
 generate = st.button("Generate Consolidated Excel", disabled=not uploaded_files)
 
-# ---------------- Constants ----------------
+MONTH_ORDER = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"]
 MONTH_MAP = {
-    "04": "Apr","05": "May","06": "Jun","07": "Jul",
-    "08": "Aug","09": "Sep","10": "Oct","11": "Nov",
-    "12": "Dec","01": "Jan","02": "Feb","03": "Mar"
+    "04":"Apr","05":"May","06":"Jun","07":"Jul",
+    "08":"Aug","09":"Sep","10":"Oct","11":"Nov",
+    "12":"Dec","01":"Jan","02":"Feb","03":"Mar"
 }
-MONTH_ORDER = list(MONTH_MAP.values())
+
+TAXES = ["Taxable Value","IGST","CGST","SGST","CESS"]
 
 TABLES = [
     ("Table 4 – B2B", "b2b"),
     ("Table 5A – B2C (Large)", "b2cl"),
     ("Table 5B – B2C (Others)", "b2cs"),
-    ("Table 6A – Exports (With Tax)", ("exp", "Y")),
-    ("Table 6B – Exports (Without Tax)", ("exp", "N")),
+    ("Table 6A – Exports (With Tax)", ("exp","Y")),
+    ("Table 6B – Exports (Without Tax)", ("exp","N")),
+    ("Table 7 – HSN Summary", "hsn"),
     ("Table 8 – Nil / Exempt / Non-GST", "nil"),
     ("Table 9B – CDNR", "cdnr"),
     ("Table 9B – CDNUR", "cdnur"),
@@ -38,77 +37,107 @@ TABLES = [
     ("Table 11B – B2C Amendments", "b2csa")
 ]
 
-TAX_ROWS = ["Taxable Value", "IGST", "CGST", "SGST", "CESS"]
+def blank_tax():
+    return dict.fromkeys(TAXES, 0)
 
-# ---------------- Helper Functions ----------------
-def extract_invoice_values(data, pay_flag=None):
-    vals = dict.fromkeys(TAX_ROWS, 0)
+def extract_inv(data):
+    v = blank_tax()
     for e in data:
-        if pay_flag and e.get("pay") != pay_flag:
-            continue
         for inv in e.get("inv", []):
             for it in inv.get("itms", []):
                 d = it.get("itm_det", {})
-                vals["Taxable Value"] += d.get("txval", 0)
-                vals["IGST"] += d.get("iamt", 0)
-                vals["CGST"] += d.get("camt", 0)
-                vals["SGST"] += d.get("samt", 0)
-                vals["CESS"] += d.get("csamt", 0)
-    return vals
+                v["Taxable Value"] += d.get("txval",0)
+                v["IGST"] += d.get("iamt",0)
+                v["CGST"] += d.get("camt",0)
+                v["SGST"] += d.get("samt",0)
+                v["CESS"] += d.get("csamt",0)
+    return v
 
-def extract_table8(nil_data):
-    vals = dict.fromkeys(TAX_ROWS, 0)
-    sup = nil_data.get("sup_details", {})
-    for k in ["expt_amt", "nil_amt", "ngsup_amt"]:
-        block = sup.get(k, {})
-        vals["Taxable Value"] += block.get("txval", 0)
-        vals["IGST"] += block.get("iamt", 0)
-        vals["CGST"] += block.get("camt", 0)
-        vals["SGST"] += block.get("samt", 0)
-        vals["CESS"] += block.get("csamt", 0)
-    return vals
+def extract_cdn(data):
+    v = blank_tax()
+    for e in data:
+        for nt in e.get("nt", []):
+            for it in nt.get("itms", []):
+                d = it.get("itm_det", {})
+                v["Taxable Value"] += d.get("txval",0)
+                v["IGST"] += d.get("iamt",0)
+                v["CGST"] += d.get("camt",0)
+                v["SGST"] += d.get("samt",0)
+                v["CESS"] += d.get("csamt",0)
+    return v
 
-# ---------------- Main Logic ----------------
+def extract_hsn(hsn):
+    v = blank_tax()
+    for r in hsn.get("data", []):
+        v["Taxable Value"] += r.get("txval",0)
+        v["IGST"] += r.get("iamt",0)
+        v["CGST"] += r.get("camt",0)
+        v["SGST"] += r.get("samt",0)
+        v["CESS"] += r.get("csamt",0)
+    return v
+
+def extract_nil(nil):
+    v = blank_tax()
+    for k in ["expt_amt","nil_amt","ngsup_amt"]:
+        b = nil.get("sup_details",{}).get(k,{})
+        v["Taxable Value"] += b.get("txval",0)
+        v["IGST"] += b.get("iamt",0)
+        v["CGST"] += b.get("camt",0)
+        v["SGST"] += b.get("samt",0)
+        v["CESS"] += b.get("csamt",0)
+    return v
+
 if generate:
-    consolidated = {}
+    data_map = {}
 
-    for file in uploaded_files:
-        data = json.load(file)
-        month = MONTH_MAP.get(data.get("fp", "")[:2])
+    for table,_ in TABLES:
+        for tax in TAXES:
+            data_map[(table,tax)] = dict.fromkeys(MONTH_ORDER, 0)
 
-        for table_name, key in TABLES:
-            if key == "nil":
-                values = extract_table8(data.get("nil", {}))
+    for f in uploaded_files:
+        j = json.load(f)
+        month = MONTH_MAP.get(j.get("fp","")[:2])
+
+        for table,key in TABLES:
+            if key == "b2b":
+                vals = extract_inv(j.get("b2b",[]))
+            elif key == "b2cl":
+                vals = extract_inv(j.get("b2cl",[]))
+            elif key == "b2cs":
+                vals = extract_inv(j.get("b2cs",[]))
+            elif key == "cdnr":
+                vals = extract_cdn(j.get("cdnr",[]))
+            elif key == "cdnur":
+                vals = extract_cdn(j.get("cdnur",[]))
+            elif key == "b2ba":
+                vals = extract_inv(j.get("b2ba",[]))
+            elif key == "b2csa":
+                vals = extract_inv(j.get("b2csa",[]))
+            elif key == "hsn":
+                vals = extract_hsn(j.get("hsn",{}))
+            elif key == "nil":
+                vals = extract_nil(j.get("nil",{}))
             elif isinstance(key, tuple):
-                values = extract_invoice_values(data.get(key[0], []), key[1])
+                vals = extract_inv([e for e in j.get("exp",[]) if e.get("pay")==key[1]])
             else:
-                values = extract_invoice_values(data.get(key, []))
+                continue
 
-            for tax, amt in values.items():
-                consolidated.setdefault((table_name, tax), {})
-                consolidated[(table_name, tax)][month] = round(amt, 2)
+            for t in TAXES:
+                data_map[(table,t)][month] += round(vals[t],2)
 
-    # ---------------- Build Rows (Example-sheet style) ----------------
     rows = []
+    for table,_ in TABLES:
+        rows.append({"Particulars": table})
+        for t in TAXES:
+            r = {"Particulars": f"   {t}"}
+            r.update(data_map[(table,t)])
+            rows.append(r)
 
-    for table_name, _ in TABLES:
-        rows.append({"Particulars": table_name})
-        for tax in TAX_ROWS:
-            row = {"Particulars": f"   {tax}"}
-            row.update(consolidated.get((table_name, tax), {}))
-            rows.append(row)
+    df = pd.DataFrame(rows)
 
-    df = pd.DataFrame(rows).fillna(0)
-
-    available_months = [m for m in MONTH_ORDER if m in df.columns]
-    df = df[["Particulars"] + available_months]
-
-    # ---------------- Excel Output ----------------
     output = BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, sheet_name="GSTR-1 Consolidated")
-
-    st.success("Consolidated Excel Ready")
+    with pd.ExcelWriter(output, engine="xlsxwriter") as w:
+        df.to_excel(w, index=False, sheet_name="GSTR-1 Consolidated")
 
     st.download_button(
         "Download Consolidated Excel",
