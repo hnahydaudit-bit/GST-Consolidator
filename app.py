@@ -3,100 +3,94 @@ import json
 import pandas as pd
 from io import BytesIO
 
+# ---------------- Page Config ----------------
 st.set_page_config(page_title="GST Consolidator", layout="wide")
 
-# ------------------ UI ------------------
 st.title("GST Consolidator")
-st.caption("JSON based GST reports & consolidation tool")
+st.caption("GSTR-1 JSON → Month-wise & Table-wise Consolidated Excel")
 
+# ---------------- File Upload ----------------
 uploaded_files = st.file_uploader(
-    "Upload monthly GSTR-1 JSON files",
-    type=["json"],
+    "Upload GSTR-1 JSON files (Any number of months)",
+    type="json",
     accept_multiple_files=True
 )
 
-# ------------------ Helper Functions ------------------
+# ---------------- Button (Always Visible) ----------------
+generate_clicked = st.button(
+    "Generate Consolidated Excel",
+    disabled=(uploaded_files is None or len(uploaded_files) == 0)
+)
 
-def extract_month(json_data):
-    """Extract return period month (Apr, May etc.)"""
-    period = json_data.get("fp", "")
+# ---------------- Helper Functions ----------------
+def get_month(fp):
     month_map = {
         "04": "Apr", "05": "May", "06": "Jun",
         "07": "Jul", "08": "Aug", "09": "Sep",
         "10": "Oct", "11": "Nov", "12": "Dec",
         "01": "Jan", "02": "Feb", "03": "Mar"
     }
-    return month_map.get(period[:2], period)
+    return month_map.get(fp[:2], fp)
 
-def extract_table_values(json_data):
-    """Extract table-wise taxable value"""
-    tables = {
-        "B2B": json_data.get("b2b", []),
-        "B2CL": json_data.get("b2cl", []),
-        "B2CS": json_data.get("b2cs", []),
-        "CDNR": json_data.get("cdnr", []),
-        "CDNUR": json_data.get("cdnur", []),
-        "EXP": json_data.get("exp", [])
-    }
+def extract_txval(table_data):
+    total = 0
+    for entry in table_data:
+        for inv in entry.get("inv", []):
+            for item in inv.get("itms", []):
+                total += item.get("itm_det", {}).get("txval", 0)
+    return round(total, 2)
 
-    summary = {}
+# ---------------- Processing ----------------
+if generate_clicked:
+    st.success("Processing JSON files...")
 
-    for table, entries in tables.items():
-        taxable = 0
-        for entry in entries:
-            invs = entry.get("inv", [])
-            for inv in invs:
-                items = inv.get("itms", [])
-                for item in items:
-                    det = item.get("itm_det", {})
-                    taxable += det.get("txval", 0)
-        summary[table] = round(taxable, 2)
+    consolidated = {}
 
-    return summary
+    for file in uploaded_files:
+        data = json.load(file)
 
-# ------------------ Processing ------------------
+        month = get_month(data.get("fp", ""))
 
-if uploaded_files:
-    st.success(f"{len(uploaded_files)} file(s) uploaded successfully")
+        tables = {
+            "B2B": data.get("b2b", []),
+            "B2CL": data.get("b2cl", []),
+            "B2CS": data.get("b2cs", []),
+            "CDNR": data.get("cdnr", []),
+            "CDNUR": data.get("cdnur", []),
+            "EXP": data.get("exp", [])
+        }
 
-    if st.button("Generate Consolidated Sheet"):
-        st.success("Button clicked. Processing started.")
+        for table, table_data in tables.items():
+            value = extract_txval(table_data)
 
-        consolidated = {}
+            if table not in consolidated:
+                consolidated[table] = {}
 
-        for file in uploaded_files:
-            data = json.load(file)
-            month = extract_month(data)
-            table_data = extract_table_values(data)
+            consolidated[table][month] = value
 
-            for table, value in table_data.items():
-                if table not in consolidated:
-                    consolidated[table] = {}
-                consolidated[table][month] = value
+    # ---------------- Create DataFrame ----------------
+    df = pd.DataFrame(consolidated).T.fillna(0)
 
-        # Convert to DataFrame
-        df = pd.DataFrame(consolidated).T.fillna(0)
+    month_order = ["Apr","May","Jun","Jul","Aug","Sep",
+                   "Oct","Nov","Dec","Jan","Feb","Mar"]
 
-        # Sort months Apr–Mar
-        month_order = ["Apr","May","Jun","Jul","Aug","Sep",
-                       "Oct","Nov","Dec","Jan","Feb","Mar"]
-        df = df.reindex(columns=month_order, fill_value=0)
+    df = df.reindex(columns=month_order, fill_value=0)
+    df.insert(0, "Table", df.index)
+    df.reset_index(drop=True, inplace=True)
 
-        df.insert(0, "Table", df.index)
-        df.reset_index(drop=True, inplace=True)
+    # ---------------- Excel Output ----------------
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="GSTR-1 Consolidated")
 
-        # Create Excel
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            df.to_excel(writer, index=False, sheet_name="GSTR-1 Consolidated")
+    st.success("Consolidated Excel ready")
 
-        st.success("Consolidated Excel generated successfully")
+    st.download_button(
+        label="Download Consolidated Excel",
+        data=output.getvalue(),
+        file_name="GSTR1_Consolidated.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
-        st.download_button(
-            label="Download Consolidated Excel",
-            data=output.getvalue(),
-            file_name="GSTR1_Consolidated.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
 
 
