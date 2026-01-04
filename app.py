@@ -4,7 +4,7 @@ import pandas as pd
 from io import BytesIO
 
 st.set_page_config("GST Consolidator", layout="wide")
-st.title("GST Consolidator – Zen Style Summary")
+st.title("GST Consolidator – Zen Style GSTR-1 Summary")
 
 MONTH_ORDER = ["Apr","May","Jun","Jul","Aug","Sep",
                "Oct","Nov","Dec","Jan","Feb","Mar"]
@@ -14,12 +14,12 @@ TABLE_MAP = {
     "B2C Large (5A/5B)": "b2cl",
     "B2C Others (7)": "b2cs",
     "Exports (6A)": "exp",
-    "Nil/Exempt/Non-GST (8)": "nil",
+    "Nil / Exempt / Non-GST (8)": "nil",
     "CDN Registered (9B)": "cdnr",
     "CDN Unregistered (9B)": "cdnur",
     "Advances Received (11A)": "at",
     "Adjustment of Advances (11B)": "txpd",
-    "Amended Supplies (9A/9C/10)": "b2ba"
+    "Amended Supplies (9A / 9C / 10)": "b2ba"
 }
 
 def get_month(fp):
@@ -29,12 +29,12 @@ def get_month(fp):
         "12":"Dec","01":"Jan","02":"Feb","03":"Mar"
     }.get(fp[:2], "NA")
 
-def extract_values(section, key):
+def extract_values(j, key):
     tx = ig = cg = sg = cs = 0
 
-    # B2B / B2CL / CDN / EXP
+    # B2B / B2CL / CDN / EXP / AMENDMENTS
     if key in ["b2b","b2cl","cdnr","cdnur","exp","b2ba"]:
-        for e in section:
+        for e in j.get(key, []):
             for inv in e.get("inv", []):
                 for it in inv.get("itms", []):
                     d = it.get("itm_det", {})
@@ -46,16 +46,17 @@ def extract_values(section, key):
 
     # B2CS – Table 7
     elif key == "b2cs":
-        for e in section:
+        for e in j.get("b2cs", []):
             tx += e.get("txval",0)
             ig += e.get("iamt",0)
             cg += e.get("camt",0)
             sg += e.get("samt",0)
             cs += e.get("csamt",0)
 
-    # NIL – Table 8
+    # NIL – Table 8 (SPECIAL STRUCTURE)
     elif key == "nil":
-        for e in section:
+        nil_data = j.get("nil", {})
+        for e in nil_data.get("inv", []):
             tx += (
                 e.get("nil_amt",0) +
                 e.get("expt_amt",0) +
@@ -64,7 +65,7 @@ def extract_values(section, key):
 
     # Advances – 11A & 11B
     elif key in ["at","txpd"]:
-        for e in section:
+        for e in j.get(key, []):
             tx += e.get("ad_amt",0)
             ig += e.get("iamt",0)
             cg += e.get("camt",0)
@@ -87,8 +88,7 @@ if st.button("Generate Consolidated Excel") and files:
         month = get_month(j.get("fp",""))
 
         for table, key in TABLE_MAP.items():
-            section = j.get(key, [])
-            tx, ig, cg, sg, cs = extract_values(section, key)
+            tx, ig, cg, sg, cs = extract_values(j, key)
 
             for label, value in zip(
                 ["Taxable Value","IGST","CGST","SGST","CESS"],
@@ -114,6 +114,7 @@ if st.button("Generate Consolidated Excel") and files:
         output.getvalue(),
         "GSTR1_Zen_Style_Summary.xlsx"
     )
+
 
 
 
