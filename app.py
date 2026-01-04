@@ -31,6 +31,8 @@ def add_tax(bucket, item):
 
 if uploaded_files and st.button("Generate Consolidated Excel"):
     data = {}
+        st.success("Button clicked. Processing started.")
+
 
     for file in uploaded_files:
         j = json.load(file)
