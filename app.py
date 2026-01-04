@@ -4,102 +4,114 @@ import pandas as pd
 from io import BytesIO
 
 # ---------------- Page Config ----------------
-st.set_page_config(
-    page_title="GST Consolidator",
-    layout="wide"
-)
-
+st.set_page_config(page_title="GST Consolidator", layout="wide")
 st.title("GST Consolidator")
-st.caption("GSTR-1 JSON → Month-wise & Table-wise Consolidated Excel")
+st.caption("GSTR-1 JSON → Table-wise & Month-wise Consolidated Excel")
 
-# ---------------- File Upload ----------------
+# ---------------- Upload ----------------
 uploaded_files = st.file_uploader(
-    "Upload GSTR-1 JSON files (Upload 1 to 12 months)",
+    "Upload GSTR-1 JSON files (Any number of months)",
     type="json",
     accept_multiple_files=True
 )
 
-st.divider()
+generate = st.button(
+    "Generate Consolidated Excel",
+    disabled=not uploaded_files
+)
 
-# ---------------- Generate Button (ALWAYS VISIBLE) ----------------
-generate = st.button("Generate Consolidated Excel")
+# ---------------- Helpers ----------------
+MONTH_MAP = {
+    "04": "Apr", "05": "May", "06": "Jun",
+    "07": "Jul", "08": "Aug", "09": "Sep",
+    "10": "Oct", "11": "Nov", "12": "Dec",
+    "01": "Jan", "02": "Feb", "03": "Mar"
+}
 
-# ---------------- Helper Functions ----------------
+MONTH_ORDER = ["Apr","May","Jun","Jul","Aug","Sep",
+               "Oct","Nov","Dec","Jan","Feb","Mar"]
+
+TABLE_MAP = {
+    "Table 4 - B2B": "b2b",
+    "Table 5A - B2C (Large)": "b2cl",
+    "Table 5B - B2C (Others)": "b2cs",
+    "Table 6A - Exports (With Tax)": ("exp", "Y"),
+    "Table 6B - Exports (Without Tax)": ("exp", "N"),
+    "Table 9B - CDNR": "cdnr",
+    "Table 9B - CDNUR": "cdnur",
+    "Table 11A - B2B Amendments": "b2ba",
+    "Table 11B - B2C Amendments": "b2csa"
+}
+
 def get_month(fp):
-    month_map = {
-        "04": "Apr", "05": "May", "06": "Jun",
-        "07": "Jul", "08": "Aug", "09": "Sep",
-        "10": "Oct", "11": "Nov", "12": "Dec",
-        "01": "Jan", "02": "Feb", "03": "Mar"
-    }
-    return month_map.get(fp[:2], fp)
+    return MONTH_MAP.get(fp[:2], fp)
 
-def extract_txval(table_data):
-    total = 0
-    for entry in table_data:
+def extract_values(data, export_flag=None):
+    txval = igst = cgst = sgst = cess = 0
+
+    for entry in data:
+        if export_flag is not None and entry.get("pay") != export_flag:
+            continue
+
         for inv in entry.get("inv", []):
             for item in inv.get("itms", []):
-                total += item.get("itm_det", {}).get("txval", 0)
-    return round(total, 2)
+                det = item.get("itm_det", {})
+                txval += det.get("txval", 0)
+                igst += det.get("iamt", 0)
+                cgst += det.get("camt", 0)
+                sgst += det.get("samt", 0)
+                cess += det.get("csamt", 0)
+
+    return {
+        "Taxable Value": round(txval, 2),
+        "IGST": round(igst, 2),
+        "CGST": round(cgst, 2),
+        "SGST": round(sgst, 2),
+        "CESS": round(cess, 2)
+    }
 
 # ---------------- Processing ----------------
 if generate:
-
-    if not uploaded_files:
-        st.error("Please upload at least one GSTR-1 JSON file.")
-        st.stop()
-
     st.success("Processing JSON files...")
 
-    consolidated = {}
+    result = {}
 
     for file in uploaded_files:
         data = json.load(file)
-
         month = get_month(data.get("fp", ""))
 
-        tables = {
-            "B2B": data.get("b2b", []),
-            "B2CL": data.get("b2cl", []),
-            "B2CS": data.get("b2cs", []),
-            "CDNR": data.get("cdnr", []),
-            "CDNUR": data.get("cdnur", []),
-            "EXP": data.get("exp", [])
-        }
+        for table_name, key in TABLE_MAP.items():
+            if isinstance(key, tuple):
+                table_key, flag = key
+                values = extract_values(data.get(table_key, []), flag)
+            else:
+                values = extract_values(data.get(key, []))
 
-        for table, table_data in tables.items():
-            value = extract_txval(table_data)
+            for tax_type, amount in values.items():
+                row = f"{table_name} - {tax_type}"
+                if row not in result:
+                    result[row] = {}
+                result[row][month] = amount
 
-            if table not in consolidated:
-                consolidated[table] = {}
-
-            consolidated[table][month] = value
-
-    # ---------------- Create DataFrame ----------------
-    df = pd.DataFrame(consolidated).T.fillna(0)
-
-    month_order = [
-        "Apr", "May", "Jun", "Jul", "Aug", "Sep",
-        "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"
-    ]
-
-    df = df.reindex(columns=month_order, fill_value=0)
-    df.insert(0, "Table", df.index)
+    df = pd.DataFrame(result).T.fillna(0)
+    df = df.reindex(columns=MONTH_ORDER, fill_value=0)
+    df.insert(0, "Particulars", df.index)
     df.reset_index(drop=True, inplace=True)
 
-    # ---------------- Excel Output ----------------
+    # ---------------- Excel ----------------
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         df.to_excel(writer, index=False, sheet_name="GSTR-1 Consolidated")
 
-    st.success("Consolidated Excel ready")
+    st.success("Consolidated Excel Ready")
 
     st.download_button(
-        label="Download Consolidated Excel",
-        data=output.getvalue(),
-        file_name="GSTR1_Consolidated.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        "Download Consolidated Excel",
+        output.getvalue(),
+        "GSTR1_Consolidated.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
 
 
 
