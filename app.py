@@ -1,12 +1,13 @@
+import streamlit as st
 import json
 import pandas as pd
-import streamlit as st
 from io import BytesIO
 
 st.set_page_config(page_title="GST Consolidator", layout="wide")
 
+# ------------------ UI ------------------
 st.title("GST Consolidator")
-st.caption("Month-wise consolidated GSTR-1 summary from JSON files")
+st.caption("JSON based GST reports & consolidation tool")
 
 uploaded_files = st.file_uploader(
     "Upload monthly GSTR-1 JSON files",
@@ -14,70 +15,88 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-def get_month(fp):
-    return pd.to_datetime(fp, format="%m%Y").strftime("%b-%y")
+# ------------------ Helper Functions ------------------
 
-def empty_bucket():
-    return {"Taxable Value": 0, "IGST": 0, "CGST": 0, "SGST": 0, "CESS": 0}
+def extract_month(json_data):
+    """Extract return period month (Apr, May etc.)"""
+    period = json_data.get("fp", "")
+    month_map = {
+        "04": "Apr", "05": "May", "06": "Jun",
+        "07": "Jul", "08": "Aug", "09": "Sep",
+        "10": "Oct", "11": "Nov", "12": "Dec",
+        "01": "Jan", "02": "Feb", "03": "Mar"
+    }
+    return month_map.get(period[:2], period)
 
-def add_tax(bucket, item):
-    bucket["Taxable Value"] += item.get("txval", 0)
-    for tax in item.get("itms", []):
-        det = tax.get("itm_det", {})
-        bucket["IGST"] += det.get("iamt", 0)
-        bucket["CGST"] += det.get("camt", 0)
-        bucket["SGST"] += det.get("samt", 0)
-        bucket["CESS"] += det.get("csamt", 0)
+def extract_table_values(json_data):
+    """Extract table-wise taxable value"""
+    tables = {
+        "B2B": json_data.get("b2b", []),
+        "B2CL": json_data.get("b2cl", []),
+        "B2CS": json_data.get("b2cs", []),
+        "CDNR": json_data.get("cdnr", []),
+        "CDNUR": json_data.get("cdnur", []),
+        "EXP": json_data.get("exp", [])
+    }
 
-if uploaded_files and st.button("Generate Consolidated Excel"):
-    data = {}
+    summary = {}
+
+    for table, entries in tables.items():
+        taxable = 0
+        for entry in entries:
+            invs = entry.get("inv", [])
+            for inv in invs:
+                items = inv.get("itms", [])
+                for item in items:
+                    det = item.get("itm_det", {})
+                    taxable += det.get("txval", 0)
+        summary[table] = round(taxable, 2)
+
+    return summary
+
+# ------------------ Processing ------------------
+
+if uploaded_files:
+    st.success(f"{len(uploaded_files)} file(s) uploaded successfully")
+
+    if st.button("Generate Consolidated Sheet"):
         st.success("Button clicked. Processing started.")
 
+        consolidated = {}
 
-    for file in uploaded_files:
-        j = json.load(file)
-        month = get_month(j["fp"])
-        data.setdefault(month, {})
+        for file in uploaded_files:
+            data = json.load(file)
+            month = extract_month(data)
+            table_data = extract_table_values(data)
 
-        tables = {
-            "B2B": j.get("b2b", []),
-            "B2C": j.get("b2cl", []) + j.get("b2cs", []),
-            "CDNR": j.get("cdnr", []) + j.get("cdnur", []),
-            "EXP": j.get("exp", [])
-        }
+            for table, value in table_data.items():
+                if table not in consolidated:
+                    consolidated[table] = {}
+                consolidated[table][month] = value
 
-        for table, entries in tables.items():
-            bucket = empty_bucket()
+        # Convert to DataFrame
+        df = pd.DataFrame(consolidated).T.fillna(0)
 
-            for e in entries:
-                for inv in e.get("inv", []):
-                    add_tax(bucket, inv)
+        # Sort months Apr–Mar
+        month_order = ["Apr","May","Jun","Jul","Aug","Sep",
+                       "Oct","Nov","Dec","Jan","Feb","Mar"]
+        df = df.reindex(columns=month_order, fill_value=0)
 
-            data[month][table] = bucket
+        df.insert(0, "Table", df.index)
+        df.reset_index(drop=True, inplace=True)
 
-    # Convert to pivot format
-    rows = []
-    for month, tables in data.items():
-        for table, vals in tables.items():
-            for k, v in vals.items():
-                rows.append({
-                    "Row": f"{table} - {k}",
-                    "Month": month,
-                    "Value": v
-                })
+        # Create Excel
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            df.to_excel(writer, index=False, sheet_name="GSTR-1 Consolidated")
 
-    df = pd.DataFrame(rows)
-    final_df = df.pivot(index="Row", columns="Month", values="Value").fillna(0)
+        st.success("Consolidated Excel generated successfully")
 
-    # Excel output
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        final_df.to_excel(writer, sheet_name="GSTR-1 Summary")
+        st.download_button(
+            label="Download Consolidated Excel",
+            data=output.getvalue(),
+            file_name="GSTR1_Consolidated.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
-    st.success("Excel generated successfully")
-    st.download_button(
-        "Download Consolidated Excel",
-        buffer.getvalue(),
-        file_name="GST_Consolidated_GSTR1.xlsx"
-    )
 
