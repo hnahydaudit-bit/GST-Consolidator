@@ -3,107 +3,96 @@ import json
 import pandas as pd
 from io import BytesIO
 
-# ---------------- Page Config ----------------
 st.set_page_config(page_title="GST Consolidator", layout="wide")
 st.title("GST Consolidator")
 st.caption("GSTR-1 JSON → Table-wise & Month-wise Consolidated Excel")
 
-# ---------------- Upload ----------------
 uploaded_files = st.file_uploader(
-    "Upload GSTR-1 JSON files (Any number of months)",
+    "Upload GSTR-1 JSON files",
     type="json",
     accept_multiple_files=True
 )
 
-generate = st.button(
-    "Generate Consolidated Excel",
-    disabled=not uploaded_files
-)
+generate = st.button("Generate Consolidated Excel", disabled=not uploaded_files)
 
-# ---------------- Helpers ----------------
 MONTH_MAP = {
-    "04": "Apr", "05": "May", "06": "Jun",
-    "07": "Jul", "08": "Aug", "09": "Sep",
-    "10": "Oct", "11": "Nov", "12": "Dec",
-    "01": "Jan", "02": "Feb", "03": "Mar"
+    "04": "Apr","05": "May","06": "Jun","07": "Jul",
+    "08": "Aug","09": "Sep","10": "Oct","11": "Nov",
+    "12": "Dec","01": "Jan","02": "Feb","03": "Mar"
 }
+MONTH_ORDER = list(MONTH_MAP.values())
 
-MONTH_ORDER = ["Apr","May","Jun","Jul","Aug","Sep",
-               "Oct","Nov","Dec","Jan","Feb","Mar"]
+TABLES = [
+    ("Table 4 – B2B", "b2b"),
+    ("Table 5A – B2C (Large)", "b2cl"),
+    ("Table 5B – B2C (Others)", "b2cs"),
+    ("Table 6A – Exports (With Tax)", ("exp","Y")),
+    ("Table 6B – Exports (Without Tax)", ("exp","N")),
+    ("Table 8 – Nil / Exempt / Non-GST", "nil"),
+    ("Table 9B – CDNR", "cdnr"),
+    ("Table 9B – CDNUR", "cdnur"),
+    ("Table 11A – B2B Amendments", "b2ba"),
+    ("Table 11B – B2C Amendments", "b2csa")
+]
 
-TABLE_MAP = {
-    "Table 4 - B2B": "b2b",
-    "Table 5A - B2C (Large)": "b2cl",
-    "Table 5B - B2C (Others)": "b2cs",
-    "Table 6A - Exports (With Tax)": ("exp", "Y"),
-    "Table 6B - Exports (Without Tax)": ("exp", "N"),
-    "Table 9B - CDNR": "cdnr",
-    "Table 9B - CDNUR": "cdnur",
-    "Table 11A - B2B Amendments": "b2ba",
-    "Table 11B - B2C Amendments": "b2csa"
-}
-
-def get_month(fp):
-    return MONTH_MAP.get(fp[:2], fp)
-
-def extract_values(data, export_flag=None):
-    txval = igst = cgst = sgst = cess = 0
-
-    for entry in data:
-        if export_flag is not None and entry.get("pay") != export_flag:
+def extract_invoice_values(data, pay_flag=None):
+    vals = dict.fromkeys(["Taxable Value","IGST","CGST","SGST","CESS"],0)
+    for e in data:
+        if pay_flag and e.get("pay") != pay_flag:
             continue
+        for inv in e.get("inv", []):
+            for it in inv.get("itms", []):
+                d = it.get("itm_det", {})
+                vals["Taxable Value"] += d.get("txval",0)
+                vals["IGST"] += d.get("iamt",0)
+                vals["CGST"] += d.get("camt",0)
+                vals["SGST"] += d.get("samt",0)
+                vals["CESS"] += d.get("csamt",0)
+    return vals
 
-        for inv in entry.get("inv", []):
-            for item in inv.get("itms", []):
-                det = item.get("itm_det", {})
-                txval += det.get("txval", 0)
-                igst += det.get("iamt", 0)
-                cgst += det.get("camt", 0)
-                sgst += det.get("samt", 0)
-                cess += det.get("csamt", 0)
+def extract_table8(nil):
+    vals = dict.fromkeys(["Taxable Value","IGST","CGST","SGST","CESS"],0)
+    sd = nil.get("sup_details",{})
+    for k in ["expt_amt","nil_amt","ngsup_amt"]:
+        for tax in vals:
+            vals[tax] += sd.get(k,{}).get(tax.lower().replace(" ","_"),0)
+    return vals
 
-    return {
-        "Taxable Value": round(txval, 2),
-        "IGST": round(igst, 2),
-        "CGST": round(cgst, 2),
-        "SGST": round(sgst, 2),
-        "CESS": round(cess, 2)
-    }
-
-# ---------------- Processing ----------------
 if generate:
-    st.success("Processing JSON files...")
+    final = {}
 
-    result = {}
+    for f in uploaded_files:
+        data = json.load(f)
+        month = MONTH_MAP.get(data.get("fp","")[:2])
 
-    for file in uploaded_files:
-        data = json.load(file)
-        month = get_month(data.get("fp", ""))
+        for table_name, key in TABLES:
+            if table_name not in final:
+                final[table_name] = {}
 
-        for table_name, key in TABLE_MAP.items():
-            if isinstance(key, tuple):
-                table_key, flag = key
-                values = extract_values(data.get(table_key, []), flag)
+            if key == "nil":
+                vals = extract_table8(data.get("nil",{}))
+            elif isinstance(key, tuple):
+                vals = extract_invoice_values(data.get(key[0],[]), key[1])
             else:
-                values = extract_values(data.get(key, []))
+                vals = extract_invoice_values(data.get(key,[]))
 
-            for tax_type, amount in values.items():
-                row = f"{table_name} - {tax_type}"
-                if row not in result:
-                    result[row] = {}
-                result[row][month] = amount
+            for tax,val in vals.items():
+                final.setdefault((table_name,tax),{})[month] = round(val,2)
 
-    df = pd.DataFrame(result).T.fillna(0)
-    df = df.reindex(columns=MONTH_ORDER, fill_value=0)
-    df.insert(0, "Particulars", df.index)
-    df.reset_index(drop=True, inplace=True)
+    rows = []
+    for table,_ in TABLES:
+        rows.append({ "Particulars": table })
+        for tax in ["Taxable Value","IGST","CGST","SGST","CESS"]:
+            row = { "Particulars": f"   {tax}" }
+            row.update(final.get((table,tax),{}))
+            rows.append(row)
 
-    # ---------------- Excel ----------------
+    df = pd.DataFrame(rows).fillna(0)
+    df = df[["Particulars"] + MONTH_ORDER]
+
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         df.to_excel(writer, index=False, sheet_name="GSTR-1 Consolidated")
-
-    st.success("Consolidated Excel Ready")
 
     st.download_button(
         "Download Consolidated Excel",
@@ -111,6 +100,7 @@ if generate:
         "GSTR1_Consolidated.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
 
 
 
