@@ -5,7 +5,7 @@ from io import BytesIO
 
 st.set_page_config(page_title="GSTR-1 Consolidator", layout="wide")
 st.title("GSTR-1 Consolidator")
-st.caption("Zen-style GSTR-1 Summary using GST Portal calculated data")
+st.caption("Zen-style GSTR-1 Summary (Portal calculated data)")
 
 uploaded_files = st.file_uploader(
     "Upload monthly GSTR-1 JSON files",
@@ -13,7 +13,8 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-MONTH_ORDER = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"]
+MONTH_ORDER = ["Apr","May","Jun","Jul","Aug","Sep",
+               "Oct","Nov","Dec","Jan","Feb","Mar"]
 
 def get_month(fp):
     return {
@@ -21,8 +22,8 @@ def get_month(fp):
         "10":"Oct","11":"Nov","12":"Dec","01":"Jan","02":"Feb","03":"Mar"
     }.get(fp[:2], fp)
 
-# Table mapping exactly like GST portal / Zen
-TABLE_MAP = [
+# Exact portal summary keys
+TABLES = [
     ("4 B2B Invoices", "b2b"),
     ("5A B2C (Large)", "b2cl"),
     ("5B B2C (Others)", "b2cs"),
@@ -34,7 +35,7 @@ TABLE_MAP = [
     ("11B Adjustment of Advances", "atadj"),
 ]
 
-TAX_KEYS = [
+TAX_ROWS = [
     ("Taxable Value", "txval"),
     ("IGST", "igst"),
     ("CGST", "cgst"),
@@ -52,14 +53,14 @@ if st.button("Generate Consolidated Excel", disabled=not uploaded_files):
 
         sec_sum = data.get("sec_sum", {})
 
-        for table_name, key in TABLE_MAP:
-            section = sec_sum.get(key, {})
+        for table_name, table_key in TABLES:
+            section = sec_sum.get(table_key, {})
 
-            for label, tax_key in TAX_KEYS:
+            for tax_label, tax_key in TAX_ROWS:
                 rows.append({
-                    "Particulars": f"{table_name} - {label}",
+                    "Particulars": f"{table_name} - {tax_label}",
                     "Month": month,
-                    "Value": section.get(tax_key, 0)
+                    "Value": float(section.get(tax_key, 0))
                 })
 
     df = pd.DataFrame(rows)
@@ -84,14 +85,15 @@ if st.button("Generate Consolidated Excel", disabled=not uploaded_files):
 
     output.seek(0)
 
-    st.success("Consolidated GSTR-1 summary ready")
+    st.success("GSTR-1 Consolidated Summary Ready")
 
     st.download_button(
         "⬇ Download Consolidated Excel",
         data=output,
-        file_name="GSTR1_Zen_Style_Summary.xlsx",
+        file_name="GSTR1_Zen_Style_Consolidated.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
 
 
 
