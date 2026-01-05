@@ -1,98 +1,99 @@
 import streamlit as st
 import json
 import pandas as pd
+from collections import defaultdict
 from io import BytesIO
 
 st.set_page_config(page_title="GSTR-1 Consolidator", layout="wide")
-st.title("GSTR-1 Consolidator")
-st.caption("Zen-style GSTR-1 Summary (Portal calculated data)")
+st.title("GSTR-1 Month-wise Consolidation (Zen Style)")
+
+MONTH_ORDER = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"]
+
+TABLES = [
+    ("4",  "B2B Invoices - 4A, 4B, 4C, 6B, 6C", "b2b"),
+    ("5A", "B2C Invoices - 5A, 5B (Large)", "b2cl"),
+    ("7",  "B2C Invoices - 7 (Others)", "b2cs"),
+    ("6A", "Exports Invoices - 6A", "exp"),
+    ("8",  "Nil rated, exempted and non GST outward supplies - 8", "nil"),
+    ("9B-R", "Credit/Debit Notes (Registered) - 9B", "cdnr"),
+    ("9B-U", "Credit/Debit Notes (Unregistered) - 9B", "cdnur"),
+    ("11A", "Tax Liability (Advances Received) - 11A", "at"),
+    ("11B", "Adjustment of Advances - 11B", "txpd")
+]
+
+def empty_month_dict():
+    return {m: 0 for m in MONTH_ORDER}
+
+summary_data = defaultdict(lambda: {
+    "Taxable Value": empty_month_dict(),
+    "IGST": empty_month_dict(),
+    "CGST": empty_month_dict(),
+    "SGST": empty_month_dict(),
+    "Cess": empty_month_dict()
+})
 
 uploaded_files = st.file_uploader(
-    "Upload monthly GSTR-1 JSON files",
+    "Upload Monthly GSTR-1 JSON files",
     type="json",
     accept_multiple_files=True
 )
 
-MONTH_ORDER = ["Apr","May","Jun","Jul","Aug","Sep",
-               "Oct","Nov","Dec","Jan","Feb","Mar"]
-
-def get_month(fp):
-    return {
-        "04":"Apr","05":"May","06":"Jun","07":"Jul","08":"Aug","09":"Sep",
-        "10":"Oct","11":"Nov","12":"Dec","01":"Jan","02":"Feb","03":"Mar"
-    }.get(fp[:2], fp)
-
-# GST Portal summary tables (Zen uses these)
-TABLES = [
-    ("4 B2B Invoices", "b2b"),
-    ("5A B2C (Large)", "b2cl"),
-    ("5B B2C (Others)", "b2cs"),
-    ("6A Exports", "exp"),
-    ("8 Nil / Exempt / Non-GST", "nil"),
-    ("9B CDNR (Registered)", "cdnr"),
-    ("9B CDNUR (Unregistered)", "cdnur"),
-    ("11A Advances Received", "at"),
-    ("11B Adjustment of Advances", "atadj"),
-]
-
-TAX_ROWS = [
-    ("Taxable Value", "txval"),
-    ("IGST", "igst"),
-    ("CGST", "cgst"),
-    ("SGST", "sgst"),
-    ("CESS", "cess"),
-]
-
-if st.button("Generate Consolidated Excel", disabled=not uploaded_files):
-
-    rows = []
-
+if uploaded_files:
     for file in uploaded_files:
         data = json.load(file)
-        month = get_month(data.get("fp", ""))
 
-        sec_sum = data.get("sec_sum", {})
+        fp = data.get("fp", "")
+        month = MONTH_ORDER[int(fp.split("")[0]) - 1] if fp[:2].isdigit() else None
+        if month not in MONTH_ORDER:
+            continue
 
-        for table_name, table_key in TABLES:
-            section = sec_sum.get(table_key, {})
+        sec_sum = data.get("summary", {}).get("sec_sum", {})
 
-            for label, tax_key in TAX_ROWS:
-                rows.append({
-                    "Particulars": f"{table_name} - {label}",
-                    "Month": month,
-                    "Value": float(section.get(tax_key, 0))
-                })
+        for _, _, key in TABLES:
+            sec = sec_sum.get(key, {})
+            summary_data[key]["Taxable Value"][month] += sec.get("txval", 0)
+            summary_data[key]["IGST"][month] += sec.get("igst", 0)
+            summary_data[key]["CGST"][month] += sec.get("cgst", 0)
+            summary_data[key]["SGST"][month] += sec.get("sgst", 0)
+            summary_data[key]["Cess"][month] += sec.get("cess", 0)
 
-    df = pd.DataFrame(rows)
+if st.button("Generate Consolidated Excel"):
+    rows = []
 
-    pivot = (
-        df.pivot_table(
-            index="Particulars",
-            columns="Month",
-            values="Value",
-            aggfunc="sum",
-            fill_value=0
-        )
-        .reindex(columns=MONTH_ORDER, fill_value=0)
-    )
+    for tbl_no, tbl_name, key in TABLES:
+        heading = f"GSTR-1 Summary calculated by Govt. Portal: {tbl_name}"
+        rows.append({"Particulars": heading})
 
-    pivot["TOTAL"] = pivot.sum(axis=1)
-    pivot.reset_index(inplace=True)
+        for tax in ["Taxable Value", "IGST", "CGST", "SGST", "Cess"]:
+            row = {"Particulars": tax}
+            total = 0
+            for m in MONTH_ORDER:
+                val = summary_data[key][tax][m]
+                row[m] = val
+                total += val
+            row["TOTAL"] = total
+            rows.append(row)
+
+    df = pd.DataFrame(rows).fillna(0)
+
+    for col in MONTH_ORDER + ["TOTAL"]:
+        if col not in df.columns:
+            df[col] = 0
+
+    df = df[["Particulars"] + MONTH_ORDER + ["TOTAL"]]
 
     output = BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        pivot.to_excel(writer, index=False, sheet_name="GSTR-1 Summary")
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="GSTR-1 Summary")
 
-    output.seek(0)
-
-    st.success("GSTR-1 consolidated summary ready")
-
+    st.success("Consolidated GSTR-1 Summary Generated")
     st.download_button(
-        label="⬇ Download Consolidated Excel",
-        data=output,
-        file_name="GSTR1_Zen_Style_Consolidated.xlsx",
+        "Download Excel",
+        data=output.getvalue(),
+        file_name="GSTR1_Consolidated_Zen_Style.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
 
 
 
