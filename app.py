@@ -7,9 +7,11 @@ from io import BytesIO
 st.set_page_config(page_title="GSTR-1 Consolidator", layout="wide")
 st.title("GSTR-1 Month-wise Consolidation")
 
-# Order of months as per Example Sheet
-MONTH_ORDER = ["2024-04-01", "2024-05-01", "2024-06-01", "2024-07-01", "2024-08-01", "2024-09-01", 
-               "2024-10-01", "2024-11-01", "2024-12-01", "2025-01-01", "2025-02-01", "2025-03-01"]
+# Exactly matching the date columns in your Example Sheet
+MONTH_ORDER = [
+    "2024-04-01", "2024-05-01", "2024-06-01", "2024-07-01", "2024-08-01", "2024-09-01", 
+    "2024-10-01", "2024-11-01", "2024-12-01", "2025-01-01", "2025-02-01", "2025-03-01"
+]
 
 TABLES = [
     ("B2B Invoices - 4A, 4B, 4C, 6B, 6C", "b2b"),
@@ -24,7 +26,7 @@ TABLES = [
 ]
 
 def get_month_key(fp):
-    """Converts portal 'fp' (MMYYYY) to the date format in Example Sheet."""
+    """Converts '082024' to '2024-08-01'"""
     if not fp or len(fp) != 6: return None
     return f"{fp[2:]}-{fp[:2]}-01"
 
@@ -37,59 +39,73 @@ if uploaded_files:
     for file in uploaded_files:
         try:
             data = json.load(file)
-            month_key = get_month_key(data.get("fp", ""))
-            if month_key not in MONTH_ORDER: continue
+            m_key = get_month_key(data.get("fp", ""))
+            
+            if m_key not in MONTH_ORDER:
+                continue
 
-            for label, key in TABLES:
+            for _, key in TABLES:
                 section_data = data.get(key, [])
                 
                 for entry in section_data:
-                    # Identify the list of documents based on section type
-                    docs = []
-                    if key in ['b2b', 'b2cl']:
-                        docs = entry.get('inv', [])
-                    elif key in ['cdnr', 'cdnur']:
-                        docs = entry.get('nt', [])
-                    else:
-                        docs = [entry] # Direct items like B2CS
+                    # Logic for B2B / B2CL / CDNR (Nested under ctin)
+                    if isinstance(entry, dict) and ('inv' in entry or 'nt' in entry):
+                        docs = entry.get('inv', []) or entry.get('nt', [])
+                        for doc in docs:
+                            for item in doc.get('itms', []):
+                                det = item.get('itm_det', item)
+                                summary_data[key]["Taxable Value"][m_key] += det.get("txval", 0)
+                                summary_data[key]["IGST"][m_key] += det.get("iamt", 0)
+                                summary_data[key]["CGST"][m_key] += det.get("camt", 0)
+                                summary_data[key]["SGST"][m_key] += det.get("samt", 0)
+                                summary_data[key]["Cess"][m_key] += det.get("csamt", 0)
+                    
+                    # Logic for B2CS / AT / TXPD (Flat list of items)
+                    elif isinstance(entry, dict):
+                        # Some sections like B2CS have a flat 'itms' list or direct fields
+                        summary_data[key]["Taxable Value"][m_key] += entry.get("txval", 0)
+                        summary_data[key]["IGST"][m_key] += entry.get("iamt", 0)
+                        summary_data[key]["CGST"][m_key] += entry.get("camt", 0)
+                        summary_data[key]["SGST"][m_key] += entry.get("samt", 0)
+                        summary_data[key]["Cess"][m_key] += entry.get("csamt", 0)
 
-                    for doc in docs:
-                        items = doc.get('itms', [])
-                        for item in items:
-                            # Tax details are usually in 'itm_det'
-                            det = item.get('itm_det', item)
-                            summary_data[key]["Taxable Value"][month_key] += det.get("txval", 0)
-                            summary_data[key]["IGST"][month_key] += det.get("iamt", 0)
-                            summary_data[key]["CGST"][month_key] += det.get("camt", 0)
-                            summary_data[key]["SGST"][month_key] += det.get("samt", 0)
-                            summary_data[key]["Cess"][month_key] += det.get("csamt", 0)
         except Exception as e:
-            st.error(f"Error processing {file.name}: {e}")
+            st.warning(f"Skipped {file.name} due to format error: {e}")
 
     if st.button("Generate Consolidated Excel"):
-        rows = []
+        final_rows = []
         for tbl_name, key in TABLES:
-            rows.append({"Particulars": f"GSTR-1 Summary calculated by Govt. Portal: {tbl_name}"})
-            for tax_type in ["Taxable Value", "IGST", "CGST", "SGST", "Cess"]:
-                row = {"Particulars": tax_type}
-                total = 0
+            # Header row like in Example Sheet
+            final_rows.append({"Particulars": f"GSTR-1 Summary calculated by Govt. Portal: {tbl_name}"})
+            
+            for tax in ["Taxable Value", "IGST", "CGST", "SGST", "Cess"]:
+                row = {"Particulars": tax}
+                total_val = 0
                 for m in MONTH_ORDER:
-                    val = summary_data[key][tax_type][m]
+                    val = summary_data[key][tax][m]
                     row[m] = round(val, 2)
-                    total += val
-                row["Total"] = round(total, 2)
-                rows.append(row)
-            rows.append({"Particulars": ""}) # Spacer
+                    total_val += val
+                row["Total"] = round(total_val, 2)
+                final_rows.append(row)
+            
+            # Add an empty row for spacing
+            final_rows.append({"Particulars": None})
 
-        df = pd.DataFrame(rows)
+        df = pd.DataFrame(final_rows)
+        
+        # Prepare file for download
         output = BytesIO()
+        # openpyxl is used here - ensure it is in requirements.txt
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="GSTR-1 Summary")
         
-        st.success("Consolidated GSTR-1 Summary Generated")
-        st.download_button("Download Excel", data=output.getvalue(), 
-                           file_name="GSTR1_Consolidated.xlsx", 
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.success("Summary Generated Successfully!")
+        st.download_button(
+            label="Download Excel File",
+            data=output.getvalue(),
+            file_name="GSTR1_Consolidated_Report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 
 
