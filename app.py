@@ -22,7 +22,7 @@ def get_month(fp):
         "10":"Oct","11":"Nov","12":"Dec","01":"Jan","02":"Feb","03":"Mar"
     }.get(fp[:2], fp)
 
-# Exact portal summary keys
+# GST Portal summary tables (Zen uses these)
 TABLES = [
     ("4 B2B Invoices", "b2b"),
     ("5A B2C (Large)", "b2cl"),
@@ -49,16 +49,16 @@ if st.button("Generate Consolidated Excel", disabled=not uploaded_files):
 
     for file in uploaded_files:
         data = json.load(file)
-        month = get_month(data.get("fp",""))
+        month = get_month(data.get("fp", ""))
 
         sec_sum = data.get("sec_sum", {})
 
         for table_name, table_key in TABLES:
             section = sec_sum.get(table_key, {})
 
-            for tax_label, tax_key in TAX_ROWS:
+            for label, tax_key in TAX_ROWS:
                 rows.append({
-                    "Particulars": f"{table_name} - {tax_label}",
+                    "Particulars": f"{table_name} - {label}",
                     "Month": month,
                     "Value": float(section.get(tax_key, 0))
                 })
@@ -80,19 +80,20 @@ if st.button("Generate Consolidated Excel", disabled=not uploaded_files):
     pivot.reset_index(inplace=True)
 
     output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         pivot.to_excel(writer, index=False, sheet_name="GSTR-1 Summary")
 
     output.seek(0)
 
-    st.success("GSTR-1 Consolidated Summary Ready")
+    st.success("GSTR-1 consolidated summary ready")
 
     st.download_button(
-        "⬇ Download Consolidated Excel",
+        label="⬇ Download Consolidated Excel",
         data=output,
         file_name="GSTR1_Zen_Style_Consolidated.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
 
 
 
