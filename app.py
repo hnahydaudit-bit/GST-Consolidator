@@ -8,6 +8,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 st.set_page_config(page_title="GSTR-1 Consolidator", layout="wide")
 st.title("GSTR-1 Month-wise Consolidation")
 
+# Month sequence
 MONTH_LABELS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
 FP_MAP = {
     "04": "Apr", "05": "May", "06": "Jun", "07": "Jul", "08": "Aug", "09": "Sep",
@@ -43,6 +44,7 @@ if uploaded_files:
                 section = data.get(key, [])
                 if not section: continue
 
+                # Specialized Extraction Logic
                 if key == "nil":
                     inv_list = section.get("inv", []) if isinstance(section, dict) else section
                     for item in inv_list:
@@ -80,10 +82,11 @@ if uploaded_files:
 
     if st.button("Generate Professional Excel"):
         final_rows = []
-        header_indices = []
+        table_name_row_indices = []
         
         for tbl_name, key in TABLES:
-            header_indices.append(len(final_rows) + 2) # Row index for blue header
+            # Mark the index for the blue background (using 1-based indexing for Excel)
+            table_name_row_indices.append(len(final_rows) + 2) 
             final_rows.append({"Particulars": f"GSTR-1 Summary calculated by Govt. Portal: {tbl_name}"})
             
             tax_rows = ["Nil-rated Supply", "Exempt Supply", "Non-GST Supply"] if key == "nil" else ["Taxable Value", "IGST", "CGST", "SGST", "Cess"]
@@ -106,38 +109,45 @@ if uploaded_files:
             workbook = writer.book
             ws = writer.sheets["GSTR-1 Summary"]
             
-            # Styles
-            cambria_11 = Font(name="Cambria", size=11)
+            # Formatting Definitions
+            cambria_11 = Font(name="Cambria", size=11, bold=False)
             cambria_11_bold = Font(name="Cambria", size=11, bold=True)
-            very_light_blue = PatternFill(start_color="F2F7FC", end_color="F2F7FC", fill_type="solid")
+            custom_light_blue = PatternFill(start_color="D6EAF8", end_color="D6EAF8", fill_type="solid")
             accounting_format = '_(* #,##0_);_(* (#,##0);_(* "-"??_);_(@_)'
             
-            for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+            # 1. Apply Cambria 11 Normal to everything first
+            for row in ws.iter_rows():
                 for cell in row:
-                    cell.font = cambria_11 # Default
-                    # Bold Column A (Particulars)
-                    if cell.column == 1:
-                        cell.font = cambria_11_bold
-                    # Apply accounting format and bold to numeric columns
-                    if cell.column > 1 and isinstance(cell.value, (int, float)):
-                        cell.number_format = accounting_format
-                        cell.font = cambria_11_bold
+                    cell.font = cambria_11
             
-            # Bold Header Row (Month names)
+            # 2. Bold the Month Names (Header row)
             for cell in ws[1]:
                 cell.font = cambria_11_bold
-            
-            # Style Table Name Rows
-            for r_idx in header_indices:
-                for c_idx in range(1, ws.max_column + 1):
-                    ws.cell(row=r_idx, column=c_idx).fill = very_light_blue
-                    ws.cell(row=r_idx, column=c_idx).font = cambria_11_bold
 
-            # Auto-adjust column width
+            # 3. Bold the Particulars (Column A)
+            for row in range(2, ws.max_row + 1):
+                ws.cell(row=row, column=1).font = cambria_11_bold
+
+            # 4. Format Numeric Columns (Column B onwards)
+            # Numbers remain normal weight, but get commas
+            for row in range(2, ws.max_row + 1):
+                for col in range(2, ws.max_column + 1):
+                    cell = ws.cell(row=row, column=col)
+                    if isinstance(cell.value, (int, float)):
+                        cell.number_format = accounting_format
+
+            # 5. Apply Bold and Color to Table Name Rows
+            for r_idx in table_name_row_indices:
+                for c_idx in range(1, ws.max_column + 1):
+                    cell = ws.cell(row=r_idx, column=c_idx)
+                    cell.fill = custom_light_blue
+                    cell.font = cambria_11_bold
+
+            # Column Width Adjust
             ws.column_dimensions['A'].width = 60
 
-        st.success("Report Ready!")
-        st.download_button("Download Excel", output.getvalue(), "GSTR1_Consolidated.xlsx")
+        st.success("Consolidation Complete!")
+        st.download_button("Download Final Report", output.getvalue(), "GSTR1_Consolidated_Final.xlsx")
 
 
 
