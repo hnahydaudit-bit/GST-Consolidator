@@ -6,6 +6,26 @@ from io import BytesIO
 from openpyxl.styles import Font, PatternFill, Alignment
 
 st.set_page_config(page_title="GSTR-1 Consolidator", layout="wide")
+
+# Custom CSS for Light Blue and White Download Button
+st.markdown("""
+    <style>
+    div.stDownloadButton > button {
+        background-color: #D6EAF8 !important;
+        color: #000000 !important;
+        border: 1px solid #AED6F1 !important;
+        border-radius: 5px;
+        padding: 0.5rem 1rem;
+        font-family: 'Cambria';
+    }
+    div.stDownloadButton > button:hover {
+        background-color: #FFFFFF !important;
+        border: 1px solid #3498DB !important;
+        color: #3498DB !important;
+    }
+    </style>
+    """, unsafe_allow_ diethyl=True)
+
 st.title("GSTR-1 Month-wise Consolidation")
 
 # Month Labels with Years for FY 2024-25
@@ -92,7 +112,6 @@ if uploaded_files:
         table_name_row_indices = []
         
         for _, tbl_name, key in TABLES:
-            # Row index for formatting
             table_name_row_indices.append(len(final_rows) + 2) 
             final_rows.append({"Particulars": f"GSTR-1 Summary calculated by Govt. Portal: {tbl_name}"})
             
@@ -115,36 +134,30 @@ if uploaded_files:
             df.to_excel(writer, index=False, sheet_name="GSTR-1 Summary")
             ws = writer.sheets["GSTR-1 Summary"]
             
-            # Styles
             cambria_normal = Font(name="Cambria", size=11, bold=False)
             cambria_bold = Font(name="Cambria", size=11, bold=True)
             custom_blue = PatternFill(start_color="D6EAF8", end_color="D6EAF8", fill_type="solid")
             acc_format = '_(* #,##0_);_(* (#,##0);_(* "-"??_);_(@_)'
             
-            # Apply Normal Cambria to everything by default
             for row in ws.iter_rows():
                 for cell in row:
                     cell.font = cambria_normal
 
-            # 1. Bold Header Row (Month Names)
             for cell in ws[1]:
                 cell.font = cambria_bold
 
-            # 2. Bold ONLY the Table Name Rows and Apply Blue Fill
             for r_idx in table_name_row_indices:
                 for c_idx in range(1, ws.max_column + 1):
                     cell = ws.cell(row=r_idx, column=c_idx)
                     cell.fill = custom_blue
                     cell.font = cambria_bold
 
-            # 3. Numeric Formatting (Normal weight)
             for row in range(2, ws.max_row + 1):
                 for col in range(2, ws.max_column + 1):
                     cell = ws.cell(row=row, column=col)
                     if isinstance(cell.value, (int, float)):
                         cell.number_format = acc_format
 
-            # Adjust Column Width
             ws.column_dimensions['A'].width = 65
 
         st.success("Consolidation successful!")
