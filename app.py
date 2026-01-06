@@ -8,7 +8,6 @@ from openpyxl.styles import Font, PatternFill, Alignment
 st.set_page_config(page_title="GSTR-1 Consolidator", layout="wide")
 st.title("GSTR-1 Month-wise Consolidation")
 
-# Month sequence
 MONTH_LABELS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
 FP_MAP = {
     "04": "Apr", "05": "May", "06": "Jun", "07": "Jul", "08": "Aug", "09": "Sep",
@@ -16,15 +15,15 @@ FP_MAP = {
 }
 
 TABLES = [
-    ("B2B Invoices - 4A, 4B, 4C, 6B, 6C", "b2b"),
-    ("B2C Invoices - 5A, 5B (Large)", "b2cl"),
-    ("B2C Invoices 7 - B2C (Others)", "b2cs"),
-    ("Exports Invoices - 6A", "exp"),
-    ("Nil rated, exempted and non GST outward supplies - 8", "nil"),
-    ("Credit/Debit Notes (Registered) - 9B", "cdnr"),
-    ("Credit/Debit Notes (Unregistered) - 9B", "cdnur"),
-    ("Tax Liability (Advances Received) - 11A", "at"),
-    ("Adjustment of Advances - 11B", "txpd")
+    ("4", "B2B Invoices - 4A, 4B, 4C, 6B, 6C", "b2b"),
+    ("5A", "B2C Invoices - 5A, 5B (Large)", "b2cl"),
+    ("7", "B2C Invoices 7 - B2C (Others)", "b2cs"),
+    ("6A", "Exports Invoices - 6A", "exp"),
+    ("8", "Nil rated, exempted and non GST outward supplies - 8", "nil"),
+    ("9B-R", "Credit/Debit Notes (Registered) - 9B", "cdnr"),
+    ("9B-U", "Credit/Debit Notes (Unregistered) - 9B", "cdnur"),
+    ("11A", "Tax Liability (Advances Received) - 11A", "at"),
+    ("11B", "Adjustment of Advances - 11B", "txpd")
 ]
 
 summary_data = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
@@ -40,11 +39,10 @@ if uploaded_files:
             m_label = FP_MAP.get(fp[:2])
             if not m_label: continue
 
-            for _, key in TABLES:
+            for _, _, key in TABLES:
                 section = data.get(key, [])
                 if not section: continue
 
-                # Specialized Extraction Logic
                 if key == "nil":
                     inv_list = section.get("inv", []) if isinstance(section, dict) else section
                     for item in inv_list:
@@ -84,8 +82,7 @@ if uploaded_files:
         final_rows = []
         table_name_row_indices = []
         
-        for tbl_name, key in TABLES:
-            # Mark the index for the blue background (using 1-based indexing for Excel)
+        for _, tbl_name, key in TABLES:
             table_name_row_indices.append(len(final_rows) + 2) 
             final_rows.append({"Particulars": f"GSTR-1 Summary calculated by Govt. Portal: {tbl_name}"})
             
@@ -106,48 +103,45 @@ if uploaded_files:
         
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="GSTR-1 Summary")
-            workbook = writer.book
             ws = writer.sheets["GSTR-1 Summary"]
             
-            # Formatting Definitions
-            cambria_11 = Font(name="Cambria", size=11, bold=False)
-            cambria_11_bold = Font(name="Cambria", size=11, bold=True)
-            custom_light_blue = PatternFill(start_color="D6EAF8", end_color="D6EAF8", fill_type="solid")
-            accounting_format = '_(* #,##0_);_(* (#,##0);_(* "-"??_);_(@_)'
+            # Formatting Styles
+            cambria_normal = Font(name="Cambria", size=11, bold=False)
+            cambria_bold = Font(name="Cambria", size=11, bold=True)
+            custom_blue = PatternFill(start_color="D6EAF8", end_color="D6EAF8", fill_type="solid")
+            acc_format = '_(* #,##0_);_(* (#,##0);_(* "-"??_);_(@_)'
             
-            # 1. Apply Cambria 11 Normal to everything first
+            # Apply Normal Cambria to all cells first
             for row in ws.iter_rows():
                 for cell in row:
-                    cell.font = cambria_11
+                    cell.font = cambria_normal
             
-            # 2. Bold the Month Names (Header row)
+            # 1. Bold Header Row (Month Names)
             for cell in ws[1]:
-                cell.font = cambria_11_bold
+                cell.font = cambria_bold
 
-            # 3. Bold the Particulars (Column A)
+            # 2. Bold Column A (Particulars)
             for row in range(2, ws.max_row + 1):
-                ws.cell(row=row, column=1).font = cambria_11_bold
+                ws.cell(row=row, column=1).font = cambria_bold
 
-            # 4. Format Numeric Columns (Column B onwards)
-            # Numbers remain normal weight, but get commas
+            # 3. Numeric Formatting (Normal weight, not bold)
             for row in range(2, ws.max_row + 1):
                 for col in range(2, ws.max_column + 1):
                     cell = ws.cell(row=row, column=col)
                     if isinstance(cell.value, (int, float)):
-                        cell.number_format = accounting_format
+                        cell.number_format = acc_format
 
-            # 5. Apply Bold and Color to Table Name Rows
+            # 4. Bold + Blue for Table Name Rows
             for r_idx in table_name_row_indices:
                 for c_idx in range(1, ws.max_column + 1):
                     cell = ws.cell(row=r_idx, column=c_idx)
-                    cell.fill = custom_light_blue
-                    cell.font = cambria_11_bold
+                    cell.fill = custom_blue
+                    cell.font = cambria_bold
 
-            # Column Width Adjust
-            ws.column_dimensions['A'].width = 60
+            ws.column_dimensions['A'].width = 65
 
-        st.success("Consolidation Complete!")
-        st.download_button("Download Final Report", output.getvalue(), "GSTR1_Consolidated_Final.xlsx")
+        st.success("Report Generated!")
+        st.download_button("Download Excel Report", output.getvalue(), "GSTR1_Consolidated_Clean.xlsx")
 
 
 
