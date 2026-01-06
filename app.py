@@ -8,7 +8,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 st.set_page_config(page_title="GSTR-1 Consolidator", layout="wide")
 st.title("GSTR-1 Month-wise Consolidation")
 
-# Updated Month Labels with Years for FY 2024-25
+# Month Labels with Years for FY 2024-25
 MONTH_LABELS = [
     "Apr-24", "May-24", "Jun-24", "Jul-24", "Aug-24", "Sep-24", 
     "Oct-24", "Nov-24", "Dec-24", "Jan-25", "Feb-25", "Mar-25"
@@ -87,11 +87,12 @@ if uploaded_files:
         except Exception as e:
             st.error(f"Error in {file.name}: {str(e)}")
 
-    if st.button("Generate Professional Excel"):
+    if st.button("Generate Consolidated Excel"):
         final_rows = []
         table_name_row_indices = []
         
         for _, tbl_name, key in TABLES:
+            # Row index for formatting
             table_name_row_indices.append(len(final_rows) + 2) 
             final_rows.append({"Particulars": f"GSTR-1 Summary calculated by Govt. Portal: {tbl_name}"})
             
@@ -114,16 +115,18 @@ if uploaded_files:
             df.to_excel(writer, index=False, sheet_name="GSTR-1 Summary")
             ws = writer.sheets["GSTR-1 Summary"]
             
+            # Styles
             cambria_normal = Font(name="Cambria", size=11, bold=False)
             cambria_bold = Font(name="Cambria", size=11, bold=True)
             custom_blue = PatternFill(start_color="D6EAF8", end_color="D6EAF8", fill_type="solid")
             acc_format = '_(* #,##0_);_(* (#,##0);_(* "-"??_);_(@_)'
             
+            # Apply Normal Cambria to everything by default
             for row in ws.iter_rows():
                 for cell in row:
                     cell.font = cambria_normal
 
-            # 1. Bold Header Row (Apr-24, May-24...)
+            # 1. Bold Header Row (Month Names)
             for cell in ws[1]:
                 cell.font = cambria_bold
 
@@ -141,14 +144,8 @@ if uploaded_files:
                     if isinstance(cell.value, (int, float)):
                         cell.number_format = acc_format
 
+            # Adjust Column Width
             ws.column_dimensions['A'].width = 65
 
-        st.success("Report Generated!")
-        st.download_button("Download Excel Report", output.getvalue(), "GSTR1_Consolidated.xlsx")
-
-
-
-
-
-
-
+        st.success("Consolidation successful!")
+        st.download_button("Download Consolidated Report", output.getvalue(), "GSTR1_Consolidated_Report.xlsx")
