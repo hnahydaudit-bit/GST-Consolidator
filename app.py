@@ -5,37 +5,61 @@ from collections import defaultdict
 from io import BytesIO
 from openpyxl.styles import Font, PatternFill, Alignment
 
+# 1. Set Page Config
 st.set_page_config(page_title="GSTR-1 Consolidator", layout="wide")
 
-# Custom CSS for Light Blue and White Download Button - FIXED SYNTAX
+# 2. Custom CSS for Light Blue/White/Black Theme
 st.markdown("""
     <style>
-    div.stDownloadButton > button {
+    /* Main Background */
+    .stApp {
+        background-color: #FFFFFF;
+    }
+    
+    /* Header Color */
+    h1 {
+        color: #1B4F72;
+        font-family: 'Cambria', serif;
+    }
+
+    /* Styling for BOTH the Generate and Download buttons */
+    div.stButton > button, div.stDownloadButton > button {
         background-color: #D6EAF8 !important;
         color: #000000 !important;
         border: 1px solid #AED6F1 !important;
-        border-radius: 5px;
-        padding: 0.5rem 1rem;
-        font-family: 'Cambria';
+        border-radius: 8px;
+        padding: 0.6rem 1.2rem;
+        font-family: 'Cambria', serif;
         font-weight: bold;
+        width: 100%;
+        transition: 0.3s;
     }
-    div.stDownloadButton > button:hover {
+
+    /* Hover effects */
+    div.stButton > button:hover, div.stDownloadButton > button:hover {
         background-color: #FFFFFF !important;
         border: 1px solid #3498DB !important;
         color: #3498DB !important;
+        box-shadow: 0px 4px 10px rgba(0,0,0,0.05);
+    }
+    
+    /* Success Message Styling */
+    .stAlert {
+        background-color: #EBF5FB;
+        color: #1B4F72;
+        border: 1px solid #AED6F1;
     }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("GSTR-1 Month-wise Consolidation")
 
-# Month Labels with Years for FY 2024-25
+# --- Logic and Data Processing ---
 MONTH_LABELS = [
     "Apr-24", "May-24", "Jun-24", "Jul-24", "Aug-24", "Sep-24", 
     "Oct-24", "Nov-24", "Dec-24", "Jan-25", "Feb-25", "Mar-25"
 ]
 
-# Mapping portal 'fp' (MMYYYY) to our display labels
 FP_MAP = {
     "042024": "Apr-24", "052024": "May-24", "062024": "Jun-24", 
     "072024": "Jul-24", "082024": "Aug-24", "092024": "Sep-24",
@@ -65,7 +89,6 @@ if uploaded_files:
             data = json.load(file)
             fp = data.get("fp", "")
             if not fp: continue
-            
             m_label = FP_MAP.get(fp)
             if not m_label: continue
 
@@ -108,12 +131,17 @@ if uploaded_files:
         except Exception as e:
             st.error(f"Error in {file.name}: {str(e)}")
 
-    if st.button("Generate Consolidated Excel"):
+    # Layout for Buttons
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        generate_btn = st.button("Generate Consolidated Excel")
+
+    if generate_btn:
         final_rows = []
         table_name_row_indices = []
         
         for _, tbl_name, key in TABLES:
-            # Excel Indexing: 1 (header) + len(final_rows) + 1 (current row)
             table_name_row_indices.append(len(final_rows) + 2) 
             final_rows.append({"Particulars": f"GSTR-1 Summary calculated by Govt. Portal: {tbl_name}"})
             
@@ -138,26 +166,22 @@ if uploaded_files:
             
             cambria_normal = Font(name="Cambria", size=11, bold=False)
             cambria_bold = Font(name="Cambria", size=11, bold=True)
-            custom_blue = PatternFill(start_color="D6EAF8", end_color="D6EAF8", fill_type="solid")
+            custom_blue_fill = PatternFill(start_color="D6EAF8", end_color="D6EAF8", fill_type="solid")
             acc_format = '_(* #,##0_);_(* (#,##0);_(* "-"??_);_(@_)'
             
-            # Apply Normal Font to everything first
             for row in ws.iter_rows():
                 for cell in row:
                     cell.font = cambria_normal
 
-            # 1. Bold Month Headers
             for cell in ws[1]:
                 cell.font = cambria_bold
 
-            # 2. Bold + Blue Fill for Table Name Rows ONLY
             for r_idx in table_name_row_indices:
                 for c_idx in range(1, ws.max_column + 1):
                     cell = ws.cell(row=r_idx, column=c_idx)
-                    cell.fill = custom_blue
+                    cell.fill = custom_blue_fill
                     cell.font = cambria_bold
 
-            # 3. Numeric Formatting (Normal weight)
             for row in range(2, ws.max_row + 1):
                 for col in range(2, ws.max_column + 1):
                     cell = ws.cell(row=row, column=col)
@@ -167,4 +191,5 @@ if uploaded_files:
             ws.column_dimensions['A'].width = 65
 
         st.success("Consolidation successful!")
-        st.download_button("Download Consolidated Report", output.getvalue(), "GSTR1_Consolidated_Report.xlsx")
+        with col2:
+            st.download_button("Download Consolidated Report", output.getvalue(), "GSTR1_Consolidated_Report.xlsx")
