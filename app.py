@@ -83,6 +83,7 @@ if uploaded_files:
         table_name_row_indices = []
         
         for _, tbl_name, key in TABLES:
+            # Mark the row for formatting (index + 2 because Excel starts at 1 and has a header)
             table_name_row_indices.append(len(final_rows) + 2) 
             final_rows.append({"Particulars": f"GSTR-1 Summary calculated by Govt. Portal: {tbl_name}"})
             
@@ -105,43 +106,40 @@ if uploaded_files:
             df.to_excel(writer, index=False, sheet_name="GSTR-1 Summary")
             ws = writer.sheets["GSTR-1 Summary"]
             
-            # Formatting Styles
+            # Styles
             cambria_normal = Font(name="Cambria", size=11, bold=False)
             cambria_bold = Font(name="Cambria", size=11, bold=True)
             custom_blue = PatternFill(start_color="D6EAF8", end_color="D6EAF8", fill_type="solid")
             acc_format = '_(* #,##0_);_(* (#,##0);_(* "-"??_);_(@_)'
             
-            # Apply Normal Cambria to all cells first
+            # Apply Normal Cambria to everything by default
             for row in ws.iter_rows():
                 for cell in row:
                     cell.font = cambria_normal
-            
+
             # 1. Bold Header Row (Month Names)
             for cell in ws[1]:
                 cell.font = cambria_bold
 
-            # 2. Bold Column A (Particulars)
-            for row in range(2, ws.max_row + 1):
-                ws.cell(row=row, column=1).font = cambria_bold
-
-            # 3. Numeric Formatting (Normal weight, not bold)
-            for row in range(2, ws.max_row + 1):
-                for col in range(2, ws.max_column + 1):
-                    cell = ws.cell(row=row, column=col)
-                    if isinstance(cell.value, (int, float)):
-                        cell.number_format = acc_format
-
-            # 4. Bold + Blue for Table Name Rows
+            # 2. Bold ONLY the Table Name Rows and Apply Blue Fill
             for r_idx in table_name_row_indices:
                 for c_idx in range(1, ws.max_column + 1):
                     cell = ws.cell(row=r_idx, column=c_idx)
                     cell.fill = custom_blue
                     cell.font = cambria_bold
 
+            # 3. Numeric Formatting (Normal weight)
+            for row in range(2, ws.max_row + 1):
+                for col in range(2, ws.max_column + 1):
+                    cell = ws.cell(row=row, column=col)
+                    if isinstance(cell.value, (int, float)):
+                        cell.number_format = acc_format
+
+            # Adjust Column Width
             ws.column_dimensions['A'].width = 65
 
         st.success("Report Generated!")
-        st.download_button("Download Excel Report", output.getvalue(), "GSTR1_Consolidated_Clean.xlsx")
+        st.download_button("Download Excel Report", output.getvalue(), "GSTR1_Consolidated.xlsx")
 
 
 
