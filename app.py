@@ -7,7 +7,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 st.set_page_config(page_title="GSTR-1 Consolidator", layout="wide")
 
-# Custom CSS for Light Blue and White Download Button
+# Custom CSS for Light Blue and White Download Button - FIXED SYNTAX
 st.markdown("""
     <style>
     div.stDownloadButton > button {
@@ -17,6 +17,7 @@ st.markdown("""
         border-radius: 5px;
         padding: 0.5rem 1rem;
         font-family: 'Cambria';
+        font-weight: bold;
     }
     div.stDownloadButton > button:hover {
         background-color: #FFFFFF !important;
@@ -24,7 +25,7 @@ st.markdown("""
         color: #3498DB !important;
     }
     </style>
-    """, unsafe_allow_ diethyl=True)
+    """, unsafe_allow_html=True)
 
 st.title("GSTR-1 Month-wise Consolidation")
 
@@ -112,6 +113,7 @@ if uploaded_files:
         table_name_row_indices = []
         
         for _, tbl_name, key in TABLES:
+            # Excel Indexing: 1 (header) + len(final_rows) + 1 (current row)
             table_name_row_indices.append(len(final_rows) + 2) 
             final_rows.append({"Particulars": f"GSTR-1 Summary calculated by Govt. Portal: {tbl_name}"})
             
@@ -139,19 +141,23 @@ if uploaded_files:
             custom_blue = PatternFill(start_color="D6EAF8", end_color="D6EAF8", fill_type="solid")
             acc_format = '_(* #,##0_);_(* (#,##0);_(* "-"??_);_(@_)'
             
+            # Apply Normal Font to everything first
             for row in ws.iter_rows():
                 for cell in row:
                     cell.font = cambria_normal
 
+            # 1. Bold Month Headers
             for cell in ws[1]:
                 cell.font = cambria_bold
 
+            # 2. Bold + Blue Fill for Table Name Rows ONLY
             for r_idx in table_name_row_indices:
                 for c_idx in range(1, ws.max_column + 1):
                     cell = ws.cell(row=r_idx, column=c_idx)
                     cell.fill = custom_blue
                     cell.font = cambria_bold
 
+            # 3. Numeric Formatting (Normal weight)
             for row in range(2, ws.max_row + 1):
                 for col in range(2, ws.max_column + 1):
                     cell = ws.cell(row=row, column=col)
